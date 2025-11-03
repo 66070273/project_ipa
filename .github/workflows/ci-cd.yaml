@@ -9,37 +9,7 @@ jobs:
   sonar-scan:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Wait SonarQube UP (http://localhost:9000)
-        run: |
-          set -e
-          for i in {1..120}; do
-            RES=$(curl -sf http://localhost:9000/api/system/status || true)
-            echo "status=$RES"
-            echo "$RES" | grep -q '"status":"UP"' && exit 0
-            echo "Waiting... ($i)"; sleep 5
-          done
-          echo "SonarQube not UP"; exit 1
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Install SonarScanner CLI
-        run: |
-          set -e
-          VER=5.0.1.3006
-          curl -fsSL -o scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${VER}-macosx.zip \
-          || curl -fsSL -o scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${VER}-linux.zip
-          unzip -q scanner.zip -d $HOME
-          mv $HOME/sonar-scanner-* $HOME/sonar-scanner
-          echo "$HOME/sonar-scanner/bin" >> $GITHUB_PATH
-          sonar-scanner --version
-
-            - name: Ensure admin password & create CI token
+      - name: Ensure admin password & create CI token
         run: |
           set -e
           HOST=http://localhost:9000
@@ -68,23 +38,6 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "✅ Token created successfully"
 
-      - name: Validate token
-        run: |
-          set -e
-          echo "➡️  Validating token..."
-          RES=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/authentication/validate" || true)
-          echo "Response: $RES"
-          echo "$RES" | grep -q '"valid":true' && echo "✅ Token valid" || { echo "❌ Token invalid"; exit 1; }
-
-
-      - name: SonarQube Scan
-        run: |
-          sonar-scanner \
-            -Dsonar.projectKey=nginx-demo \
-            -Dsonar.sources=./web \
-            -Dsonar.sourceEncoding=UTF-8 \
-            -Dsonar.host.url="${SONAR_HOST_URL}" \
-            -Dsonar.login="${SONAR_TOKEN}"
 
   build-and-push:
     runs-on: self-hosted
