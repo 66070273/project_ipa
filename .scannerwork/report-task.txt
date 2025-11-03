@@ -1,0 +1,6 @@
+projectKey=nginx-demo
+serverUrl=http://localhost:9000
+serverVersion=25.10.0.114319
+dashboardUrl=http://localhost:9000/dashboard?id=nginx-demo
+ceTaskId=458c307f-aed5-4568-9ed6-0716edc28929
+ceTaskUrl=http://localhost:9000/api/ce/task?id=458c307f-aed5-4568-9ed6-0716edc28929
