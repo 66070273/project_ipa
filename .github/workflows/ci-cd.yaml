@@ -8,28 +8,23 @@ env:
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo
 
 jobs:
+  # 1) Code Scan with SonarQube (รอ service แบบ HTTP polling)
   scan:
     runs-on: ubuntu-latest
-
-    # สตาร์ท SonarQube เป็น service (ไม่ใส่ healthcheck)
     services:
       sonarqube:
         image: sonarqube:community
-        # ลดข้อจำกัด ES ตอนรันใน CI
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
-        # จะ map port หรือไม่ก็ได้ เพราะเราเรียกผ่าน hostname: sonarqube
         ports:
           - 9000:9000
-
     steps:
       - uses: actions/checkout@v4
 
-      # รอให้ HTTP /api/system/status เป็น UP (คุมเวลาได้เอง)
       - name: Wait SonarQube HTTP ready
         run: |
           set -e
-          for i in {1..120}; do   # รวม ~10 นาที (120 * 5s)
+          for i in {1..120}; do   # ~10 นาที
             code=$(curl -s -o /dev/null -w "%{http_code}" http://sonarqube:9000/api/system/status || true)
             if [ "$code" = "200" ] && curl -sf http://sonarqube:9000/api/system/status | grep -q '"status":"UP"'; then
               echo "SonarQube is UP"; exit 0
@@ -38,8 +33,8 @@ jobs:
           done
           echo "SonarQube not ready in time" >&2; exit 1
 
-      # (ทางเลือก) สร้าง token ชั่วคราวจาก admin:admin เพื่อเดโม
-      - name: Create temp token
+      # ถ้ามี secret token อยู่แล้วให้ใช้ secrets.SONAR_TOKEN และลบขั้นตอน create token นี้ทิ้ง
+      - name: Create temp token (demo)
         id: mk_token
         run: |
           set -e
@@ -48,74 +43,72 @@ jobs:
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "::add-mask::$TOKEN"
 
-      # สแกน โดยชี้ไปที่ service sonarqube
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_HOST_URL: http://sonarqube:9000
-          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}   # ถ้ามี secret อยู่แล้วเปลี่ยนเป็น ${{ secrets.SONAR_TOKEN }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}   # หรือ ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=nginx-demo
             -Dsonar.sources=./web
             -Dsonar.sourceEncoding=UTF-8
 
-  scan:
+  # 2) Build & Push Docker
+  build_push:
     runs-on: ubuntu-latest
-
-    # สตาร์ท SonarQube เป็น service ภายใน job นี้
-    services:
-      sonarqube:
-        image: sonarqube:community
-        # ไม่ต้อง expose พอร์ตออกนอก runner ก็ได้ เพราะ step จะเรียกผ่าน hostname 'sonarqube'
-        env:
-          # ใช้ embedded DB ได้สำหรับ demo
-          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
-        options: >-
-          --health-cmd="curl -s http://localhost:9000/api/system/health | grep -q -E 'GREEN|UP'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=60
-
+    needs: scan
     steps:
       - uses: actions/checkout@v4
 
-      # รอให้ SonarQube ขึ้นจริง (สำรองจาก healthcheck)
-      - name: Wait SonarQube ready
-        run: |
-          set -e
-          for i in {1..60}; do
-            if curl -sf http://sonarqube:9000/api/system/status | grep -q -E '"status":"(UP|GREEN)"'; then
-              echo "SonarQube is ready"
-              exit 0
-            fi
-            echo "Waiting SonarQube... ($i/60)"
-            sleep 5
-          done
-          echo "SonarQube not ready in time" >&2
-          exit 1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      # สร้าง token ชั่วคราวจาก admin:admin (demo เท่านั้น)
-      - name: Create temp token
-        id: mk_token
-        run: |
-          set -e
-          TOKEN_JSON=$(curl -sf -u admin:admin -X POST "http://sonarqube:9000/api/user_tokens/generate?name=ci$(date +%s)")
-          TOKEN=$(echo "$TOKEN_JSON" | jq -r .token)
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "Cannot create Sonar token"; exit 1
-          fi
-          echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
-          echo "::add-mask::$TOKEN"
-
-      # รันสแกน โดยชี้ไปที่ service 'sonarqube'
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v2
-        env:
-          SONAR_HOST_URL: http://sonarqube:9000
-          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          args: >
-            -Dsonar.projectKey=nginx-demo
-            -Dsonar.sources=./web
-            -Dsonar.sourceEncoding=UTF-8
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  # 3) Deploy (เลือกใช้วิธีเข้าถึงคลัสเตอร์อย่างใดอย่างหนึ่ง)
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build_push
+    steps:
+      - uses: actions/checkout@v4
+
+      # วิธี A: runner เข้าถึงคลัสเตอร์ได้ตรง ๆ (มี kubeconfig ใน secret)
+      - name: Write kubeconfig
+        if: ${{ secrets.KUBE_CONFIG != '' }}
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Set image & rollout
+        if: ${{ secrets.KUBE_CONFIG != '' }}
+        run: |
+          kubectl -n demo set image deployment/nginx-demo nginx=${{ env.IMAGE_NAME }}:${{ github.sha }}
+          kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
+
+      # วิธี B: SSH เข้า jump host / เครื่องที่มี kubectl (ถ้าใช้ minikube บนเครื่องตัวเอง)
+      # - name: Deploy via SSH
+      #   if: ${{ secrets.SSH_HOST != '' }}
+      #   uses: appleboy/ssh-action@v1.0.3
+      #   with:
+      #     host: ${{ secrets.SSH_HOST }}
+      #     username: ${{ secrets.SSH_USER }}
+      #     key: ${{ secrets.SSH_KEY }}
+      #     script: |
+      #       kubectl -n demo set image deployment/nginx-demo nginx=${{ env.IMAGE_NAME }}:${{ github.sha }}
+      #       kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
