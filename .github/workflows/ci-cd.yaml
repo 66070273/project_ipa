@@ -1,94 +1,65 @@
-name: CI CD Pipeline
+name: CI/CD
+
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch:
+    branches: [ main ]
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo
 
 jobs:
-  sonar:
-    # ถ้าใช้ self-hosted ให้เปลี่ยนเป็น self-hosted
+  scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # (ออปชัน) ทดสอบว่า URL Sonar เข้าถึงได้จริง
-      - name: Curl Sonar status
-        run: curl -sS ${{ secrets.SONAR_HOST_URL }}/api/system/status
-
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}   # เช่น http://127.0.0.1:9000 หรือ http://minikube:9000
+          SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=nginx-demo
             -Dsonar.sources=./web
             -Dsonar.sourceEncoding=UTF-8
-            # ถ้าใช้ SonarCloud ให้เติม -Dsonar.organization=<org_key>
 
   build_push:
-    name: Build & Push Docker
     runs-on: ubuntu-latest
     needs: scan
-    env:
-      IMAGE_NAME: teerati/nginx-demo
-      IMAGE_TAG: ${{ github.sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login DockerHub
+      - uses: actions/checkout@v4
+      - name: Docker Login
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & Push (SHA + latest)
+      - name: Build & Push
         uses: docker/build-push-action@v6
         with:
           context: ./web
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_NAME }}:latest
-          # ถ้าใช้ multi-arch
-          # platforms: linux/amd64
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
   deploy:
-    name: Deploy to Minikube
-    runs-on: self-hosted      # ต้องเป็นเครื่องที่ kubectl เข้าถึง minikube ได้
+    runs-on: ubuntu-latest
     needs: build_push
-    env:
-      IMAGE_NAME: teerati/nginx-demo
-      IMAGE_TAG: ${{ github.sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show kubectl context
-        run: kubectl config current-context
-
-      - name: Ensure namespace
-        run: kubectl apply -f k8s/namespace.yaml
-
-      - name: Apply manifests (first time / drift fix)
-        run: kubectl apply -f k8s/
-
-      # เปลี่ยนรูปใน Deployment ให้เป็น tag ใหม่ (ตาม SHA)
-      - name: Update image
+      - name: Write kubeconfig
         run: |
-          kubectl -n demo set image deployment/nginx-demo \
-            nginx=${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          set -euo pipefail
+          echo "${{ secrets.KUBECONFIG }}" > kubeconfig
+          chmod 600 kubeconfig
+          echo "KUBECONFIG=$PWD/kubeconfig" >> "$GITHUB_ENV"
 
-      - name: Wait rollout
-        run: kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
-
-      - name: Show pods
-        run: kubectl -n demo get pods -o wide
+      - name: Rollout new image
+        run: |
+          set -euo pipefail
+          kubectl --kubeconfig "$KUBECONFIG" -n demo set image \
+            deployment/nginx-demo nginx="${{ env.IMAGE_NAME }}:latest"
+          kubectl --kubeconfig "$KUBECONFIG" -n demo rollout status \
+            deployment/nginx-demo --timeout=180s
