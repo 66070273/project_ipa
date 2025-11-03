@@ -35,13 +35,14 @@ jobs:
 
       # If you already have a SONAR_TOKEN secret, delete this step and set SONAR_TOKEN from secrets instead
       - name: Create temp token (demo)
-        id: mk_token
         run: |
           set -e
-          TOKEN_JSON=$(curl -sf -u admin:admin -X POST "http://sonarqube:9000/api/user_tokens/generate?name=ci$(date +%s)")
+          HOST=http://localhost:9000
+          TOKEN_JSON=$(curl -sf -u admin:admin -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)")
           TOKEN=$(echo "$TOKEN_JSON" | jq -r .token)
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "::add-mask::$TOKEN"
+
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
