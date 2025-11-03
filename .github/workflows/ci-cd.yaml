@@ -8,7 +8,7 @@ env:
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo
 
 jobs:
-  # 1) Code Scan with SonarQube (รอ service แบบ HTTP polling)
+  # 1) Code Scan with SonarQube (HTTP polling until ready)
   scan:
     runs-on: ubuntu-latest
     services:
@@ -24,7 +24,7 @@ jobs:
       - name: Wait SonarQube HTTP ready
         run: |
           set -e
-          for i in {1..120}; do   # ~10 นาที
+          for i in {1..120}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" http://sonarqube:9000/api/system/status || true)
             if [ "$code" = "200" ] && curl -sf http://sonarqube:9000/api/system/status | grep -q '"status":"UP"'; then
               echo "SonarQube is UP"; exit 0
@@ -33,7 +33,7 @@ jobs:
           done
           echo "SonarQube not ready in time" >&2; exit 1
 
-      # ถ้ามี secret token อยู่แล้วให้ใช้ secrets.SONAR_TOKEN และลบขั้นตอน create token นี้ทิ้ง
+      # If you already have a SONAR_TOKEN secret, delete this step and set SONAR_TOKEN from secrets instead
       - name: Create temp token (demo)
         id: mk_token
         run: |
@@ -47,7 +47,8 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_HOST_URL: http://sonarqube:9000
-          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}   # หรือ ${{ secrets.SONAR_TOKEN }}
+          # Use ${{ secrets.SONAR_TOKEN }} if you have it; otherwise we use the temp token we created above
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=nginx-demo
@@ -80,26 +81,33 @@ jobs:
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-  # 3) Deploy (เลือกใช้วิธีเข้าถึงคลัสเตอร์อย่างใดอย่างหนึ่ง)
+  # 3) Deploy (optional; runs only if kubeconfig secret is present)
   deploy:
-  runs-on: ubuntu-latest
-  needs: build_push
-  # นำ secret มากำหนดเป็น env ก่อน แล้วให้ if อ้างผ่าน env
-  env:
-    KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG }}
+    runs-on: ubuntu-latest
+    needs: build_push
+    env:
+      KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG }} # base64 kubeconfig or plain text kubeconfig
+    steps:
+      - uses: actions/checkout@v4
 
-  steps:
-    - uses: actions/checkout@v4
+      - name: Install kubectl
+        run: |
+          set -e
+          curl -fsSL https://storage.googleapis.com/kubernetes-release/release/$(curl -fsSL https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl -o kubectl
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+          kubectl version --client=true
 
-    - name: Write kubeconfig (if secret exists)
-      if: ${{ env.KUBE_CONFIG_B64 != '' }}
-      run: |
-        mkdir -p ~/.kube
-        echo "${KUBE_CONFIG_B64}" > ~/.kube/config
-        chmod 600 ~/.kube/config
+      - name: Write kubeconfig if secret exists
+        if: ${{ env.KUBE_CONFIG_B64 != '' }}
+        run: |
+          mkdir -p ~/.kube
+          # If your secret is base64-encoded, decode; if it's plain YAML, drop the decode line.
+          echo "${KUBE_CONFIG_B64}" | base64 -d > ~/.kube/config || echo "${KUBE_CONFIG_B64}" > ~/.kube/config
+          chmod 600 ~/.kube/config
 
-    - name: Set image & rollout (if kubeconfig exists)
-      if: ${{ env.KUBE_CONFIG_B64 != '' }}
-      run: |
-        kubectl -n demo set image deployment/nginx-demo nginx=${{ env.IMAGE_NAME }}:${{ github.sha }}
-        kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
+      - name: Set image & rollout (only when kubeconfig exists)
+        if: ${{ env.KUBE_CONFIG_B64 != '' }}
+        run: |
+          kubectl -n demo set image deployment/nginx-demo nginx=${{ env.IMAGE_NAME }}:${{ github.sha }}
+          kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
