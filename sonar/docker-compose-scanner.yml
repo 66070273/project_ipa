@@ -1,0 +1,11 @@
+services:
+  sonar-scanner:
+    image: sonarsource/sonar-scanner-cli:latest   # <= เปลี่ยนจาก 7.3.0 เป็น latest
+    working_dir: /src
+    volumes:
+      - ..:/src
+    environment:
+      SONAR_HOST_URL: "http://host.docker.internal:9000"
+      SONAR_PROJECT_KEY: "nginx-demo"
+      SONAR_SCANNER_OPTS: "-Dsonar.projectKey=nginx-demo -Dsonar.sources=./web -Dsonar.sourceEncoding=UTF-8"
+      SONAR_TOKEN: "${SONAR_TOKEN}"
