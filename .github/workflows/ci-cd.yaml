@@ -2,88 +2,103 @@ name: CI CD Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   sonar-scan:
-  runs-on: self-hosted
-  steps:
-    - uses: actions/checkout@v4
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
 
-    # 0) ข้อมูลสภาพแวดล้อม + มีโฟลเดอร์ ./web จริงไหม
-    - name: Preflight
-      run: |
-        uname -a
-        which curl || true
-        which java || true
-        ls -la
-        ls -la web || { echo "missing ./web directory"; exit 1; }
-        test -f sonar-project.properties && echo "--- sonar-project.properties ---" && cat sonar-project.properties | sed 's/\(token\|login\|password\)=.*/\1=*** HIDDEN ***/' || echo "no sonar-project.properties"
+      - name: Preflight
+      # ตรวจว่าโฟลเดอร์ web มีจริง
+        run: |
+          uname -a
+          ls -la
+          ls -la web || { echo "missing ./web"; exit 1; }
 
-    # 1) รอ SonarQube พร้อม
-    - name: Wait SonarQube UP (http://localhost:9000)
-      run: |
-        set -e
-        for i in {1..120}; do
-          RES=$(curl -sf http://localhost:9000/api/system/status || true)
-          echo "status=$RES"
-          echo "$RES" | grep -q '"status":"UP"' && exit 0
-          echo "Waiting... ($i)"; sleep 5
-        done
-        echo "SonarQube not UP in time"; exit 1
+      - name: Wait SonarQube UP (http://localhost:9000)
+        run: |
+          set -e
+          for i in {1..120}; do
+            RES=$(curl -sf http://localhost:9000/api/system/status || true)
+            echo "status=$RES"
+            echo "$RES" | grep -q '"status":"UP"' && exit 0
+            echo "Waiting... ($i)"; sleep 5
+          done
+          echo "SonarQube not UP"; exit 1
 
-    # 2) ติดตั้ง Java + Scanner (ไม่ใช้ Docker)
-    - name: Setup Java 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: temurin
-        java-version: '17'
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-    - name: Install SonarScanner CLI (macOS first, then Linux as fallback)
-      run: |
-        set -e
-        VER=5.0.1.3006
-        curl -fsSL -o scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${VER}-macosx.zip \
-        || curl -fsSL -o scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${VER}-linux.zip
-        unzip -q scanner.zip -d $HOME
-        mv $HOME/sonar-scanner-* $HOME/sonar-scanner
-        echo "$HOME/sonar-scanner/bin" >> $GITHUB_PATH
-        sonar-scanner --version
+      - name: Install SonarScanner CLI
+        run: |
+          set -e
+          VER=5.0.1.3006
+          curl -fsSL -o scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${VER}-macosx.zip \
+          || curl -fsSL -o scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${VER}-linux.zip
+          unzip -q scanner.zip -d $HOME
+          mv $HOME/sonar-scanner-* $HOME/sonar-scanner
+          echo "$HOME/sonar-scanner/bin" >> $GITHUB_PATH
 
-    # 3) ตั้ง/ยืนยันรหัส admin ครั้งแรก + สร้าง token ชั่วคราว
-    - name: Ensure admin password & create CI token
-      run: |
-        set -e
-        HOST=http://localhost:9000
-        curl -sf -u admin:admin -X POST "$HOST/api/users/change_password?login=admin&previousPassword=admin&password=admin123" || true
-        TOK_JSON=$(curl -sf -u admin:admin123 -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)")
-        TOKEN=$(python3 - <<'PY'
-        import sys,json
-        print(json.load(sys.stdin)["token"])
-        PY
-                <<<"$TOK_JSON")
-                echo "SONAR_HOST_URL=$HOST" >> $GITHUB_ENV
-                echo "SONAR_TOKEN=$TOKEN"    >> $GITHUB_ENV
-                echo "::add-mask::$TOKEN"
+      - name: Ensure admin password & create CI token
+        run: |
+          set -e
+          HOST=http://localhost:9000
+          curl -sf -u admin:admin -X POST "$HOST/api/users/change_password?login=admin&previousPassword=admin&password=admin123" || true
+          TOK_JSON=$(curl -sf -u admin:admin123 -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)")
+          TOKEN=$(python3 - <<'PY'
+import sys,json
+print(json.load(sys.stdin)["token"])
+PY
+<<<"$TOK_JSON")
+          echo "SONAR_HOST_URL=$HOST" >> $GITHUB_ENV
+          echo "SONAR_TOKEN=$TOKEN"    >> $GITHUB_ENV
+          echo "::add-mask::$TOKEN"
 
-    # 4) ตรวจ token ให้แน่
-    - name: Validate token
-      run: |
-        set -e
-        curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/authentication/validate" | tee validate.json
-        grep -q '"valid":true' validate.json || { echo "Token invalid"; exit 1; }
+      - name: Validate token
+        run: |
+          set -e
+          curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/authentication/validate" | tee validate.json
+          grep -q '"valid":true' validate.json || { echo "Token invalid"; exit 1; }
 
-    # 5) สแกนแบบ debug (-X)
-    - name: SonarQube Scan (debug)
-      env:
-        SONAR_SCANNER_OPTS: "-Djavax.net.ssl.trustStoreType=JKS"   # ไม่กระทบ http
-      run: |
-        set -x
-        sonar-scanner \
-          -X \
-          -Dsonar.projectKey=nginx-demo \
-          -Dsonar.sources=./web \
-          -Dsonar.sourceEncoding=UTF-8 \
-          -Dsonar.host.url="${SONAR_HOST_URL}" \
-          -Dsonar.login="${SONAR_TOKEN}"
+      - name: SonarQube Scan
+        run: |
+          sonar-scanner \
+            -Dsonar.projectKey=nginx-demo \
+            -Dsonar.sources=./web \
+            -Dsonar.sourceEncoding=UTF-8 \
+            -Dsonar.host.url="${SONAR_HOST_URL}" \
+            -Dsonar.login="${SONAR_TOKEN}"
+
+  build-and-push:
+    runs-on: self-hosted
+    needs: sonar-scan
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./web
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
+
+  deploy:
+    runs-on: self-hosted
+    needs: build-and-push
+    steps:
+      - uses: actions/checkout@v4
+      - name: kubectl set image & rollout
+        run: |
+          kubectl -n demo set image deployment/nginx-demo nginx=${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
+          kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
