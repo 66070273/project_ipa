@@ -25,8 +25,8 @@ jobs:
         run: |
           set -e
           for i in {1..120}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://sonarqube:9000/api/system/status || true)
-            if [ "$code" = "200" ] && curl -sf http://sonarqube:9000/api/system/status | grep -q '"status":"UP"'; then
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9000/api/system/status || true)
+            if [ "$code" = "200" ] && curl -sf http://localhost:9000/api/system/status | grep -q '"status":"UP"'; then
               echo "SonarQube is UP"; exit 0
             fi
             echo "Waiting SonarQube... ($i)"; sleep 5
