@@ -2,8 +2,7 @@ name: CI CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -13,10 +12,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Qemu (for multi-arch, optional)
+      - name: Set up Qemu (optional)
         uses: docker/setup-qemu-action@v2
 
-      - name: Set up Docker Buildx
+      - name: Set up Buildx
         uses: docker/setup-buildx-action@v2
 
       - name: Log in to Docker Hub
@@ -30,28 +29,6 @@ jobs:
         with:
           context: ./web
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
-
-  # This deploy job is manual and expects to run on a machine that has kubectl configured
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
-
-      - name: Set Kubeconfig
-        run: |
-          echo "${{ secrets.KUBECONFIG }}" > kubeconfig
-          export KUBECONFIG=$PWD/kubeconfig
-
-      - name: Deploy to cluster
-        run: |
-          kubectl apply -f k8s/namespace.yaml
-          kubectl set image deployment/nginx-demo -n demo nginx=${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest || kubectl apply -f k8s/
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:${{ github.sha }}
