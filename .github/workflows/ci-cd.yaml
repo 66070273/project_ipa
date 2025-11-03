@@ -47,7 +47,7 @@ jobs:
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
-          SONAR_HOST_URL: http://sonarqube:9000
+          SONAR_HOST_URL: http://localhost:9000
           # Use ${{ secrets.SONAR_TOKEN }} if you have it; otherwise we use the temp token we created above
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
         with:
@@ -75,7 +75,7 @@ jobs:
       - name: Build & Push
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./web
           file: ./Dockerfile
           push: true
           tags: |
