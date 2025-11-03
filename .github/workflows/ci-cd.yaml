@@ -10,7 +10,7 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - name: Sonar Scan (via docker)
+      - name: Sonar Scan (Local SonarQube)
         uses: addnab/docker-run-action@v3
         with:
           image: sonarsource/sonar-scanner-cli:latest
@@ -24,11 +24,10 @@ jobs:
               -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: sonar-scan
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -43,7 +42,6 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
 
   deploy:
-    # รันบน self-hosted runner เครื่องคุณ ที่มี kubectl + minikube พร้อม KUBECONFIG
     runs-on: self-hosted
     needs: build-and-push
     steps:
