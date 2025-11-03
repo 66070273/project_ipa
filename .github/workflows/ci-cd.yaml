@@ -13,7 +13,7 @@ jobs:
       - name: Sonar Scan (via docker)
         uses: addnab/docker-run-action@v3
         with:
-          image: sonarsource/sonar-scanner-cli:7.3.0
+          image: sonarsource/sonar-scanner-cli:latest
           options: -v ${{ github.workspace }}:/src -w /src
           run: |
             sonar-scanner \
