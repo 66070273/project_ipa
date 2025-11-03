@@ -12,7 +12,7 @@ concurrency:
 jobs:
   scan:
     name: SonarQube Scan
-    runs-on: self-hosted   # ใช้ self-hosted เพื่อให้เห็น localhost:9000 ง่ายสุด
+    runs-on: ubuntu-latest  # ใช้ self-hosted เพื่อให้เห็น localhost:9000 ง่ายสุด
     steps:
       - name: Checkout
         uses: actions/checkout@v4
