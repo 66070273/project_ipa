@@ -39,22 +39,43 @@ jobs:
           echo "$HOME/sonar-scanner/bin" >> $GITHUB_PATH
           sonar-scanner --version
 
-      - name: Ensure admin password & create CI token
+            - name: Ensure admin password & create CI token
         run: |
           set -e
           HOST=http://localhost:9000
+
+          echo "➡️  Checking SonarQube availability..."
+          curl -sf "$HOST/api/system/status" | grep -q '"status":"UP"' || { echo "❌ SonarQube not UP"; exit 1; }
+
+          echo "➡️  Resetting admin password (safe ignore if already set)"
           curl -sf -u admin:admin -X POST "$HOST/api/users/change_password?login=admin&previousPassword=admin&password=admin123" || true
-          TOK_JSON=$(curl -sf -u admin:admin123 -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)")
-          TOKEN=$(echo "$TOK_JSON" | python3 -c "import sys, json; print(json.load(sys.stdin)['token'])")
+
+          echo "➡️  Generating new CI token..."
+          TOK_JSON=$(curl -sf -u admin:admin123 -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)" || true)
+          echo "Raw response: $TOK_JSON"
+
+          if [ -z "$TOK_JSON" ]; then
+            echo "❌ Failed to get token JSON"; exit 1;
+          fi
+
+          TOKEN=$(echo "$TOK_JSON" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token',''))")
+          if [ -z "$TOKEN" ]; then
+            echo "❌ No token parsed from response"; exit 1;
+          fi
+
           echo "SONAR_HOST_URL=$HOST" >> $GITHUB_ENV
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "::add-mask::$TOKEN"
+          echo "✅ Token created successfully"
 
       - name: Validate token
         run: |
           set -e
-          curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/authentication/validate" | tee validate.json
-          grep -q '"valid":true' validate.json || { echo "Token invalid"; exit 1; }
+          echo "➡️  Validating token..."
+          RES=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/authentication/validate" || true)
+          echo "Response: $RES"
+          echo "$RES" | grep -q '"valid":true' && echo "✅ Token valid" || { echo "❌ Token invalid"; exit 1; }
+
 
       - name: SonarQube Scan
         run: |
