@@ -1,33 +1,31 @@
 name: CI CD Pipeline
-
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  scan:
-    name: SonarQube Scan
-    runs-on: ubuntu-latest  # ใช้ self-hosted เพื่อให้เห็น localhost:9000 ง่ายสุด
+  sonar:
+    # ถ้าใช้ self-hosted ให้เปลี่ยนเป็น self-hosted
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # สแกนด้วย official SonarQube action (เซิร์ฟเวอร์ local)
+      # (ออปชัน) ทดสอบว่า URL Sonar เข้าถึงได้จริง
+      - name: Curl Sonar status
+        run: curl -sS ${{ secrets.SONAR_HOST_URL }}/api/system/status
+
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-          SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=nginx-demo
             -Dsonar.sources=./web
             -Dsonar.sourceEncoding=UTF-8
+            # ถ้าใช้ SonarCloud ให้เติม -Dsonar.organization=<org_key>
 
   build_push:
     name: Build & Push Docker
