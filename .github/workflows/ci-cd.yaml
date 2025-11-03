@@ -52,13 +52,13 @@ jobs:
           curl -sf -u admin:admin -X POST "$HOST/api/users/change_password?login=admin&previousPassword=admin&password=admin123" || true
           TOK_JSON=$(curl -sf -u admin:admin123 -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)")
           TOKEN=$(python3 - <<'PY'
-import sys,json
-print(json.load(sys.stdin)["token"])
-PY
-<<<"$TOK_JSON")
-          echo "SONAR_HOST_URL=$HOST" >> $GITHUB_ENV
-          echo "SONAR_TOKEN=$TOKEN"    >> $GITHUB_ENV
-          echo "::add-mask::$TOKEN"
+          import sys,json
+          print(json.load(sys.stdin)["token"])
+          PY
+          <<<"$TOK_JSON")
+                    echo "SONAR_HOST_URL=$HOST" >> $GITHUB_ENV
+                    echo "SONAR_TOKEN=$TOKEN"    >> $GITHUB_ENV
+                    echo "::add-mask::$TOKEN"
 
       - name: Validate token
         run: |
