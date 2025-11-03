@@ -11,6 +11,58 @@ jobs:
   scan:
     runs-on: ubuntu-latest
 
+    # สตาร์ท SonarQube เป็น service (ไม่ใส่ healthcheck)
+    services:
+      sonarqube:
+        image: sonarqube:community
+        # ลดข้อจำกัด ES ตอนรันใน CI
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+        # จะ map port หรือไม่ก็ได้ เพราะเราเรียกผ่าน hostname: sonarqube
+        ports:
+          - 9000:9000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # รอให้ HTTP /api/system/status เป็น UP (คุมเวลาได้เอง)
+      - name: Wait SonarQube HTTP ready
+        run: |
+          set -e
+          for i in {1..120}; do   # รวม ~10 นาที (120 * 5s)
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://sonarqube:9000/api/system/status || true)
+            if [ "$code" = "200" ] && curl -sf http://sonarqube:9000/api/system/status | grep -q '"status":"UP"'; then
+              echo "SonarQube is UP"; exit 0
+            fi
+            echo "Waiting SonarQube... ($i)"; sleep 5
+          done
+          echo "SonarQube not ready in time" >&2; exit 1
+
+      # (ทางเลือก) สร้าง token ชั่วคราวจาก admin:admin เพื่อเดโม
+      - name: Create temp token
+        id: mk_token
+        run: |
+          set -e
+          TOKEN_JSON=$(curl -sf -u admin:admin -X POST "http://sonarqube:9000/api/user_tokens/generate?name=ci$(date +%s)")
+          TOKEN=$(echo "$TOKEN_JSON" | jq -r .token)
+          echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$TOKEN"
+
+      # สแกน โดยชี้ไปที่ service sonarqube
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_HOST_URL: http://sonarqube:9000
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}   # ถ้ามี secret อยู่แล้วเปลี่ยนเป็น ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=nginx-demo
+            -Dsonar.sources=./web
+            -Dsonar.sourceEncoding=UTF-8
+
+  scan:
+    runs-on: ubuntu-latest
+
     # สตาร์ท SonarQube เป็น service ภายใน job นี้
     services:
       sonarqube:
