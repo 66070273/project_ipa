@@ -17,7 +17,7 @@ jobs:
           set -euo pipefail
           HOST="${HOST:-http://localhost:9000}"
 
-          echo "➡️  Checking SonarQube availability..."
+          echo "Checking SonarQube availability..."
           for i in {1..60}; do
             if curl -sSf "$HOST/api/system/status" | grep -q '"status":"UP"'; then
               break
@@ -25,26 +25,24 @@ jobs:
             echo "Waiting SonarQube... ($i)"; sleep 2
           done
 
-          echo "➡️  Validating admin password..."
+          echo "Validating admin password..."
           if ! curl -s -u "admin:${ADMIN_PASS}" "$HOST/api/authentication/validate" | grep -q '"valid":true'; then
-            echo "❌ Invalid SONAR_ADMIN_PASS (check secret value)."; exit 1
+            echo "Invalid SONAR_ADMIN_PASS (check secret value)."; exit 1
           fi
 
-          echo "✅ Admin validated, creating token..."
+          echo "Admin validated, creating token..."
           RES=$(curl -s -u "admin:${ADMIN_PASS}" -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)")
           echo "Raw response: $RES"
           TOKEN=$(python3 -c "import sys, json; print(json.load(sys.stdin).get('token',''))" <<<"$RES")
 
           if [ -z "$TOKEN" ]; then
-            echo "❌ Failed to create token"; exit 1
+            echo "Failed to create token"; exit 1
           fi
 
-          echo "✅ Token created successfully"
+          echo "Token created successfully"
           echo "SONAR_HOST_URL=$HOST" >> $GITHUB_ENV
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "::add-mask::$TOKEN"
-
-
 
   build-and-push:
     runs-on: self-hosted
