@@ -10,33 +10,40 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Ensure admin password & create CI token
+        env:
+          HOST: ${{ secrets.SONAR_HOST_URL }}
+          ADMIN_PASS: ${{ secrets.SONAR_ADMIN_PASS }}
         run: |
-          set -e
-          HOST=http://localhost:9000
+          set -euo pipefail
+          HOST="${HOST:-http://localhost:9000}"
 
           echo "➡️  Checking SonarQube availability..."
-          curl -sf "$HOST/api/system/status" | grep -q '"status":"UP"' || { echo "❌ SonarQube not UP"; exit 1; }
+          for i in {1..60}; do
+            if curl -sSf "$HOST/api/system/status" | grep -q '"status":"UP"'; then
+              break
+            fi
+            echo "Waiting SonarQube... ($i)"; sleep 2
+          done
 
-          echo "➡️  Resetting admin password (safe ignore if already set)"
-          curl -sf -u admin:admin -X POST "$HOST/api/users/change_password?login=admin&previousPassword=admin&password=admin123" || true
-
-          echo "➡️  Generating new CI token..."
-          TOK_JSON=$(curl -sf -u admin:admin123 -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)" || true)
-          echo "Raw response: $TOK_JSON"
-
-          if [ -z "$TOK_JSON" ]; then
-            echo "❌ Failed to get token JSON"; exit 1;
+          echo "➡️  Validating admin password..."
+          if ! curl -s -u "admin:${ADMIN_PASS}" "$HOST/api/authentication/validate" | grep -q '"valid":true'; then
+            echo "❌ Invalid SONAR_ADMIN_PASS (check secret value)."; exit 1
           fi
 
-          TOKEN=$(echo "$TOK_JSON" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token',''))")
+          echo "✅ Admin validated, creating token..."
+          RES=$(curl -s -u "admin:${ADMIN_PASS}" -X POST "$HOST/api/user_tokens/generate?name=ci$(date +%s)")
+          echo "Raw response: $RES"
+          TOKEN=$(python3 -c "import sys, json; print(json.load(sys.stdin).get('token',''))" <<<"$RES")
+
           if [ -z "$TOKEN" ]; then
-            echo "❌ No token parsed from response"; exit 1;
+            echo "❌ Failed to create token"; exit 1
           fi
 
+          echo "✅ Token created successfully"
           echo "SONAR_HOST_URL=$HOST" >> $GITHUB_ENV
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "::add-mask::$TOKEN"
-          echo "✅ Token created successfully"
+
 
 
   build-and-push:
