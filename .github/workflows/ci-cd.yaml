@@ -65,14 +65,11 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
 
   deploy:
-  runs-on: self-hosted
-  needs: build-and-push
-  steps:
-    - uses: actions/checkout@v4
-
-    - name: kubectl set image & rollout
-      run: |
-        kubectl -n demo set image deployment/nginx-demo \
-          nginx-demo=${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
-        kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
-
+    runs-on: self-hosted
+    needs: build-and-push
+    steps:
+      - uses: actions/checkout@v4
+      - name: kubectl set image & rollout
+        run: |
+          kubectl -n demo set image deployment/nginx-demo nginx-demo=${{ secrets.DOCKERHUB_USERNAME }}/nginx-demo:latest
+          kubectl -n demo rollout status deployment/nginx-demo --timeout=120s
