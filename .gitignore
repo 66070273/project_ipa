@@ -1,3 +1,4 @@
 .DS_Store
 sonar-project.properties
 credentials-velero
+.env
