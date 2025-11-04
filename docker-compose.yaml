@@ -1,0 +1,75 @@
+services:
+  web:
+    build:
+      context: ./web
+    image: teerati/nginx-demo:latest
+    container_name: nginx-demo
+    ports:
+      - "8080:80"
+    restart: always
+
+  sonar-scanner:
+    image: sonarsource/sonar-scanner-cli:latest
+    container_name: sonar-scanner
+    environment:
+      SONAR_HOST_URL: http://host.docker.internal:9000
+      SONAR_LOGIN: ${SONAR_TOKEN}
+    volumes:
+      - .:/usr/src
+    depends_on:
+      - web
+      - sonarqube
+    command: >
+      sonar-scanner
+      -Dsonar.projectKey=nginx-demo
+      -Dsonar.sources=web
+      -Dsonar.sourceEncoding=UTF-8
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_JDBC_USERNAME=sonar
+      - SONAR_JDBC_PASSWORD=sonar
+    volumes:
+      - sonarqube_conf:/opt/sonarqube/conf
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_extensions:/opt/sonarqube/extensions
+
+  velero:
+    image: velero/velero:v1.13.0
+    container_name: velero
+    volumes:
+      - ./credentials-velero:/credentials
+    command: >
+      velero schedule create daily-01h
+      --schedule "0 1 * * *"
+      --include-namespaces demo
+    environment:
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio123
+      VELERO_S3_URL: http://minio.velero.svc.cluster.local:9000
+    depends_on:
+      - minio
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9001:9000"
+    volumes:
+      - ./minio-data:/data
+
+volumes:
+  sonarqube_conf:
+  sonarqube_data:
+  sonarqube_logs:
+  sonarqube_extensions:
+  minio-data:
